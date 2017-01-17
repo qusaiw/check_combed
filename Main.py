@@ -1,8 +1,14 @@
 #!/usr/bin/env python
-from collections import defaultdict
+# Written by Qusai Abu-Obaida
+# 17-Jan-2017
+
 import argparse
 import os
-blaaaaaaaaaaaaaaaaa
+import re
+import pprint
+
+from collections import defaultdict
+
 cell_fail_list = {}
 
 
@@ -16,6 +22,10 @@ class Transistor:
 
 
 def get_transistors(cell_name):
+    """ Return drains and sources in a cell (list), ((drain/source) gate type) combinations with
+        transistors that share them(dict: {dgt/sgt: [trans1, trans2 ...}), branch point (list),
+        and transistors data (dict: {transistor: transistor(object)})
+    """
     drains_and_sources = []
     transistors_data = {}
     dgt_dict = defaultdict(list)
@@ -52,10 +62,13 @@ def get_transistors(cell_name):
                     del sgt_dict[n]
         return drains_and_sources, dgt_dict, sgt_dict, branch_points, transistors_data
     except IOError:
-        cell_fail_list[cell_name] = "no lvs, or corrupted file"
+        cell_fail_list[cell_name] = "no lvs"
 
 
 def find_series(branch_head, cell_name):
+    """ Returns a list of transistors connected in series with a given branch point
+        and the name of the last transistor before encountering another branch point
+    """
     current = branch_head
     big_list = [current]
     while True:
@@ -75,65 +88,94 @@ def find_series(branch_head, cell_name):
                 big_list = [branch_head]
             return [big_list, current]
 
-# //parser//
+# Parser
 parser = argparse.ArgumentParser()
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('-all', help="test all cells", action="store_true")
 group.add_argument('-list', help="test for provided list")
-parser.add_argument('-path', help="enter the path for the review folder that contains \"cells\" folder",
-                    default=os.getcwd())
+parser.add_argument('-path', help="Review folder path", default=os.getcwd())
 args = parser.parse_args()
-# returns: object
-
+# args is an object, ex: args.path = PATH
 relative_path = args.path
-if args.all:
-    cell_list_names = {cell: cell.split("_")[1][0] for cell in os.listdir(relative_path + "/cells") if
-                       (("_" in cell) and (cell.split("_")[1][0] in ("c", "v")))}
-else:
-    with open(args.list) as f:
-        cell_list_names = {cell: cell.split("_")[1][0] for cell in [line[:-1] for line in f] if
-                           (("_" in cell) and (cell.split("_")[1][0] in ("c", "v")))}
-for cell in cell_list_names:
-    data = get_transistors(cell)
-    if not data:
-        continue
-    # data is [drains_and_sources, dgt_dict, sgt_dict, branch_points, transistors_data]
-    to_delete = []
-    for key in data[1]:
-        temporary_dict = defaultdict(list)
-        for branch_point in data[1][key]:
-            for i in find_series(branch_point, cell)[0]:
-                temporary_dict[branch_point.name].append(i.g)
-            temporary_dict[branch_point.name].append(find_series(branch_point, cell)[1].s)
-        history = []
-        for head, tail in temporary_dict.items():
-            if tail in history:
-                to_delete.append(head)
-            else:
-                history.append(tail)
 
-    for key in data[2]:
-        temporary_dict = defaultdict(list)
-        for branch_point in data[2][key]:
-            for i in find_series(branch_point, cell)[0]:
-                temporary_dict[branch_point.name].append(i.g)
-            temporary_dict[branch_point.name].append(find_series(branch_point, cell)[1].d)
-        history = []
-        for head, tail in temporary_dict.items():
-            if tail in history:
-                to_delete.append(head)
-            else:
-                history.append(tail)
-    final_list = []
-    for i in to_delete:
-        if len(find_series(data[4][i], cell)[0]) > 1:
-            for u in find_series(data[4][i], cell)[0]:
-                final_list.append(u.name)
-    if cell_list_names[cell] == 'c' and len(final_list) == 0:
-        cell_fail_list[cell] = "Combed naming, uncombed structure"
-    elif cell_list_names[cell] == 'v' and len(final_list) != 0:
-        cell_fail_list[cell] = "Combed structure not announced"
-if cell_fail_list:
-    print cell_fail_list
-else:
-    print "Pass"
+
+def main():
+    """ Performs a structure test on all cells excluding flops, latches, CK cells, and fillers in their name and
+        determines whether they have a combed structure, then checks if that structure is announced in the name.
+        prints a dictionary: {cell: error)
+    """
+    combed = re.compile(r'_(cv)(\d+)')
+    exclude = re.compile(r'(^(f|l)[dsi])|(^ck)')
+    # regex that matches any occurrence of either _cv*_ or _v*_ in a cell's name
+
+    def combed_cell(cell): return combed.search(cell)
+    if args.all:
+        try:
+            cell_list_names = {cell: combed_cell(cell) for cell in os.listdir(relative_path + "/cells") if
+                               not exclude.search(cell)}
+        except OSError:
+            print 'Did not find "cells" folder'
+            quit()
+    else:
+        try:
+            with open(args.list) as f:
+                cell_list_names = {cell.strip(): combed_cell(cell) for cell in [line[:-1] for line in f] if
+                                   len(cell) != 0 and not exclude.search(cell)}
+        except IOError:
+            print "%s doesn't exist" % args.list
+            quit()
+    print "Testing %d cells..." % len(cell_list_names)
+    for cell in cell_list_names:
+        data = get_transistors(cell)
+        if not data:
+            continue
+        # data is [drains_and_sources, dgt_dict, sgt_dict, branch_points, transistors_data]
+        to_delete = []
+        for key in data[1]:
+            temporary_dict = defaultdict(list)
+            for branch_point in data[1][key]:
+                series = find_series(branch_point, cell)
+                for i in series[0]:
+                    temporary_dict[branch_point.name].append(i.g)
+                temporary_dict[branch_point.name].append(series[1].s)
+                # temporary_dict now contains the name of a branch point as key and it's value
+                # is the gates of the transistors connected with in series and finally the last
+                #  point before encountering another branch point
+            history = []
+            for head, tail in temporary_dict.items():
+                if tail in history:
+                    to_delete.append(head)
+                else:
+                    history.append(tail)
+            # This part appends to the "to_delete" list all the non unique items in temporary_dict
+        for key in data[2]:
+            temporary_dict = defaultdict(list)
+            for branch_point in data[2][key]:
+                series = find_series(branch_point, cell)
+                for i in series[0]:
+                    temporary_dict[branch_point.name].append(i.g)
+                temporary_dict[branch_point.name].append(series[1].d)
+            history = []
+            for head, tail in temporary_dict.items():
+                if tail in history:
+                    to_delete.append(head)
+                else:
+                    history.append(tail)
+        final_list = []
+        for i in to_delete:
+            # exclude "fingers" of the same transistor ex: MP1 A B C VBN, MP1_2 A B C VBN
+            if len(find_series(data[4][i], cell)[0]) > 1:
+                for u in find_series(data[4][i], cell)[0]:
+                    final_list.append(u.name)
+        if cell_list_names[cell] and len(final_list) == 0:
+            cell_fail_list[cell] = "Combed naming, uncombed structure"
+        elif not cell_list_names[cell] and len(final_list) != 0:
+            cell_fail_list[cell] = "Combed structure not announced" + str(final_list)
+    if cell_fail_list:
+        pprint.pprint(cell_fail_list)
+    else:
+        print("Pass")
+
+
+if __name__ == '__main__':
+    main()
