@@ -1,0 +1,14 @@
+*-----------------------------------------------------------     ------------
+*      Cell        : AOI211_CV20_2
+*      Description : "One 2-input AND into 3-input NOR"
+*      Equation    : X=!((A1&A2)|B1|B2)
+*      Version     : $                     Revision: 5.13 $
+*      Created     : $                     Date: 2011/08/18 09:33:56 $
+*
+
+
+.subckt AOI211_CV20_2 VDD VSS VBP VBN X A1 A2 B1 B2
+MPA1 X_P2 A1 VDD VBP pch_svt_mac W=0.038u L=0.008u M=2 nfin=2
+
+.ends
+
