@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # Written by Qusai Abu-Obaida
 # 17-Jan-2017
-# test ge8
 
 import argparse
 import os
